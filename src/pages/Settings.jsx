@@ -1,8 +1,11 @@
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { useState } from "react";
+import { presets, readTheme, saveTheme } from "../theme";
 
 export default function Settings() {
+  const [appearance, setAppearance] = useState(readTheme);
+  const updateAppearance = (value) => setAppearance(saveTheme(value));
 
   
 const [saveHistory, setSaveHistory] = useState(
@@ -52,39 +55,26 @@ const [saveHistory, setSaveHistory] = useState(
             Customize how Ateelabo AI looks.
           </p>
 
-          <div className="mt-5 flex items-center justify-between">
-            <div>
-              <p className="font-medium">
-                Theme
-              </p>
-
-              <p className="text-sm text-gray-500">
-                Dark theme (other themes are not yet supported)
-              </p>
+          <fieldset className="theme-picker">
+            <legend>Choose your atmosphere</legend>
+            <div className="theme-presets">
+              {Object.entries(presets).map(([key, theme]) => (
+                <label key={key} className={`theme-option ${appearance.preset === key ? "selected" : ""}`}>
+                  <input type="radio" name="appearance" value={key}
+                    checked={appearance.preset === key}
+                    onChange={() => updateAppearance({ preset: key, accent: theme.accent })} />
+                  <span className={`theme-preview ${theme.mode}`} style={{ "--swatch": theme.accent }} aria-hidden="true"><i /><i /><i /></span>
+                  <span>{theme.label}</span>
+                </label>
+              ))}
             </div>
-
-            <select
-  disabled
-  value="dark"
-  className="
-    rounded-xl
-    border
-    border-white/10
-    bg-zinc-900
-    px-4
-    py-2
-    text-sm
-    text-white
-    outline-none
-    transition
-    focus:border-cyan-400/40
-  "
->
-  <option value="dark">🌑 Dark</option>
-  <option value="light">☀️ Light</option>
-  <option value="system">🌓 System</option>
-</select>
-          </div>
+            <label className="accent-picker">
+              <span>Custom glow color<small>Choose any accent. Text stays readable in white or black mode.</small></span>
+              <input type="color" aria-label="Custom accent color" value={appearance.accent}
+                onChange={(e) => updateAppearance({ ...appearance, accent: e.target.value })} />
+            </label>
+            <p className="theme-save-note">Applied instantly and saved on this browser.</p>
+          </fieldset>
         </motion.div>
 
         {/* AI Assistant */}
