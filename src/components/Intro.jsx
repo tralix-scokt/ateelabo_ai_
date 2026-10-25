@@ -45,7 +45,8 @@ export default function Intro({ onEnter }) {
         >
           Enter the experience <span>↗</span>
         </button>
-        <div className="intro-note">YOUR IDEAS. A NEW DIMENSION.</div>
+        <div className="intro-note">Your Mind.<br />My Intelligence.<br /><strong>Infinite Possibilities.</strong></div>
+        <div className="intro-horizon" aria-hidden="true" />
       </div>
       <div className="intro-footer">
         <span>ATEELABO / INTELLIGENCE SYSTEM</span>

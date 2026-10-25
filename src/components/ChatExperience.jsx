@@ -19,6 +19,12 @@ export default function ChatExperience(p) {
   const [copied, setCopied] = useState(null);
   const copyTimer = useRef();
   const inputRef = useRef();
+  useEffect(() => {
+    const field = inputRef.current;
+    if (!field) return;
+    field.style.height = "auto";
+    field.style.height = Math.min(field.scrollHeight, 160) + "px";
+  }, [p.input]);
   useEffect(() => () => clearTimeout(copyTimer.current), []);
   useEffect(() => {
     const shortcut = (e) => {
@@ -114,7 +120,7 @@ export default function ChatExperience(p) {
               >
                 <Icon name="menu" />
               </button>
-              <span className="header-label">WORKSPACE</span>
+              <span className="header-label">ATEELABO <b>AI</b></span>
               <span className="header-divider">/</span>
               <span className="header-chat-title">
                 {messages.length ? p.currentChat.title : "New conversation"}
@@ -224,6 +230,15 @@ export default function ChatExperience(p) {
                           >
                             ◖ Listen
                           </button>
+                          <button
+                            aria-label="Ask a follow-up"
+                            onClick={() => {
+                              p.setInput("Tell me more about your last response.");
+                              inputRef.current?.focus();
+                            }}
+                          >
+                            <Icon name="chat" size={12} /> Follow up
+                          </button>
                           <span className="action-spacer" />
                           <button
                             aria-label="Like response"
@@ -278,7 +293,7 @@ export default function ChatExperience(p) {
                   ref={inputRef}
                   aria-label="Message Ateelabo AI"
                   value={p.input}
-                  placeholder="Where will your imagination take you?"
+                  placeholder="Type your message here…"
                   rows={1}
                   maxLength={10000}
                   onChange={(e) => p.setInput(e.target.value)}
@@ -374,6 +389,12 @@ export default function ChatExperience(p) {
               </div>
             </div>
           </div>
+          <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
+            <button onClick={() => { p.setSidebarOpen(false); inputRef.current?.focus(); }}><Icon name="chat" />Chat</button>
+            <button onClick={() => p.setSidebarOpen(true)}><Icon name="search" />History</button>
+            <button onClick={p.createNewChat}><Icon name="plus" />New chat</button>
+            <Link to="/settings"><Icon name="settings" />Settings</Link>
+          </nav>
         </main>
       </div>
       {showIntro && <Intro onEnter={enter} />}

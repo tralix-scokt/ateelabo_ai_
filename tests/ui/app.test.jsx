@@ -57,7 +57,7 @@ test('new chats do not inherit another chat document', async () => {
   vi.stubGlobal('fetch',fetchMock);
   openApp();
   await screen.findByText('Document chat');
-  fireEvent.click(screen.getByRole('button',{name:/new chat/i}));
+  fireEvent.click(screen.getAllByRole('button',{name:/new chat/i})[0]);
   fireEvent.change(screen.getByLabelText('Message Ateelabo AI'),{target:{value:'Fresh question'}});
   fireEvent.click(screen.getByLabelText('Send message'));
   await screen.findByText('Fresh reply');

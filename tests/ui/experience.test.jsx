@@ -152,3 +152,25 @@ test("interrupted streams retain partial output and show a recoverable error", a
   await screen.findByText("Response interrupted. Please regenerate.");
   expect(screen.getByLabelText("Regenerate response")).toBeTruthy();
 });
+
+test("reference prompt chips fill and focus the real composer", () => {
+  render(<MemoryRouter><App /></MemoryRouter>);
+  fireEvent.click(screen.getByRole("button", { name: "Explain something" }));
+  const composer = screen.getByLabelText("Message Ateelabo AI");
+  expect(composer.value).toBe("Explain a complex concept to me in simple terms.");
+  expect(document.activeElement).toBe(composer);
+});
+
+test("follow-up action prepares a question without making a provider request", async () => {
+  localStorage.setItem("ateelabo_chats:guest", JSON.stringify([{
+    id: "follow-up", title: "Follow up", messages: [
+      { role: "user", text: "Question" }, { role: "ai", text: "Answer" },
+    ],
+  }]));
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+  render(<MemoryRouter><App /></MemoryRouter>);
+  fireEvent.click(await screen.findByLabelText("Ask a follow-up"));
+  expect(screen.getByLabelText("Message Ateelabo AI").value).toBe("Tell me more about your last response.");
+  expect(fetch).not.toHaveBeenCalled();
+});
