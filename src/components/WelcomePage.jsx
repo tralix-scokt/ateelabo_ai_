@@ -1,86 +1,32 @@
 import NeuralMark from "./NeuralMark";
+import Icon from "./Icon";
 const prompts = [
-  [
-    "01",
-    "Explore a concept",
-    "Make the complex, clear.",
-    "Explain a complex concept to me in simple terms.",
-    "↗",
-  ],
-  [
-    "02",
-    "Build something",
-    "From first idea to working code.",
-    "Help me plan and write some code.",
-    "⌘",
-  ],
-  [
-    "03",
-    "Analyze a document",
-    "Find the insight in your PDF or DOCX.",
-    "Help me analyze a document.",
-    "▤",
-  ],
-  [
-    "04",
-    "Think beyond",
-    "A fresh perspective starts here.",
-    "Help me brainstorm an original idea.",
-    "✧",
-  ],
+  ["Help me with a project", "Help me plan a project, from the first idea to the next steps.", "chat"],
+  ["Explain something", "Explain a complex concept to me in simple terms.", "search"],
+  ["Give me ideas", "Help me brainstorm an original idea.", "plus"],
+  ["Write or code", "Help me plan and write some code.", "copy"],
+  ["Analyze a document", "Help me analyze a document.", "chat"],
 ];
 export default function WelcomePage({ setInput }) {
   return (
     <section className="welcome-panel">
-      <div className="welcome-kicker">
-        <span /> A SPACE FOR YOUR NEXT BIG IDEA
+      <div className="hero-energy"><NeuralMark animated className="hero-mark" /></div>
+      <h1 className="reference-wordmark">ATEELABO <span>AI</span></h1>
+      <p className="welcome-description">Beyond Intelligence. <span>Beyond Imagination.</span></p>
+      <div className="welcome-greeting">
+        <h2>Hey there, I’m ATEELABO AI <span aria-hidden="true">✦</span></h2>
+        <p>I’m your intelligent assistant, ready to help you think bigger, solve faster, and create more.</p>
+        <p>What would you like to explore today?</p>
       </div>
-      <div className="hero-energy">
-        <div className="energy-orbit orbit-one" />
-        <div className="energy-orbit orbit-two" />
-        <NeuralMark animated className="hero-mark" />
-        <span className="energy-coordinate coordinate-one">A / 01</span>
-        <span className="energy-coordinate coordinate-two">∞ POSSIBILITY</span>
-      </div>
-      <h1>
-        Beyond intelligence.
-        <br />
-        <span>Beyond imagination.</span>
-      </h1>
-      <p className="welcome-description">
-        A clearer thought. A bolder idea. A new possibility.
-        <br className="desktop-break" /> Make something extraordinary with
-        ATEELABO AI.
-      </p>
       <div className="prompt-grid">
-        {prompts.map(([number, title, description, prompt, icon]) => (
-          <button
-            key={number}
-            onClick={() => {
-              setInput(prompt);
-              document
-                .querySelector('[aria-label="Message Ateelabo AI"]')
-                ?.focus();
-            }}
-            className="prompt-card"
-          >
-            <div className="prompt-top">
-              <span>{number} /</span>
-              <b>{icon}</b>
-            </div>
-            <h2>{title}</h2>
-            <p>{description}</p>
-            <span className="prompt-arrow">↗</span>
-          </button>
+        {prompts.map(([title, prompt, icon]) => (
+          <button key={title} onClick={() => {
+            setInput(prompt);
+            document.querySelector('[aria-label="Message Ateelabo AI"]')?.focus();
+          }} className="prompt-card"><Icon name={icon} size={15}/><h2>{title}</h2></button>
         ))}
       </div>
-      <div className="welcome-footnote">
-        <span>THINK DEEPER</span>
-        <i />
-        <span>CREATE FREELY</span>
-        <i />
-        <span>GO FURTHER</span>
-      </div>
+      <div className="welcome-footnote"><span>YOUR MIND.</span><i/><span>MY INTELLIGENCE.</span><i/><span>INFINITE POSSIBILITIES.</span></div>
     </section>
   );
 }

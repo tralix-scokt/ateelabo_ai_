@@ -180,6 +180,9 @@ const [saveHistory, setSaveHistory] = useState(
               </div>
 
               <button
+                role="switch"
+                aria-label="Save chat history"
+                aria-checked={saveHistory}
                 onClick={() => {
   const newValue = !saveHistory;
 
@@ -219,6 +222,9 @@ const [saveHistory, setSaveHistory] = useState(
               </div>
 
               <button
+                role="switch"
+                aria-label="Enter to send"
+                aria-checked={enterToSend}
                 onClick={() => { localStorage.setItem("ateelabo_enter_to_send", String(!enterToSend)); setEnterToSend(!enterToSend); }}
                 className={`relative h-7 w-12 rounded-full transition ${
                   enterToSend
