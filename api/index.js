@@ -1,10 +1,9 @@
 // Vercel invokes this handler per request; never start a listening HTTP server here.
 import mongoose from 'mongoose';
-import { app } from '../server.js';
 import User from '../models/User.js';
 // Trace parser dependencies into the function bundle for the isolated worker.
-import 'mammoth';
-import 'pdf-parse';
+// These literal lazy imports are traced without loading native PDF code at cold start.
+async function parserDependencies() { await import('mammoth'); await import('pdf-parse'); }
 
 let connection;
 export function configured() {
@@ -34,5 +33,16 @@ export default async function handler(req, res) {
   if (!configured()) return res.status(503).json({ error: 'Deployment needs MongoDB and session configuration. The administrator must configure environment variables and redeploy.' });
   try { await database(); }
   catch { return res.status(503).json({ error: 'Database unavailable. Please try again later.' }); }
-  return app(req, res);
+  try {
+    const { app } = await import('../server.js');
+    // PDF dependencies are loaded by the isolated extraction worker, not for login/health.
+    if (req.url.startsWith('/api/chat') && req.headers['content-type']?.includes('multipart/form-data')) {
+      // Keep dependency tracing explicit; the worker performs actual extraction.
+      void parserDependencies;
+    }
+    return app(req, res);
+  } catch (error) {
+    console.error('API initialization failed:', error.name);
+    return res.status(503).json({ error: 'API initialization unavailable. Please contact the administrator.' });
+  }
 }
