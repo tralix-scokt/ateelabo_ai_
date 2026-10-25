@@ -1,8 +1,9 @@
+import { readUser } from "../lib/storage";
 
 import { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 
-const API_URL = "http://localhost:5000";
+const API_URL = "";
 
 const Icon = ({ children, className = "" }) => (
   <span className={`inline-flex items-center justify-center ${className}`}>
@@ -44,9 +45,7 @@ export default function AdminDashboard() {
 
   const [adminName] = useState(() => {
   try {
-    const user = JSON.parse(
-      localStorage.getItem("ateelabo_user") || "{}"
-    );
+    const user = (readUser() || {});
 
     return user.name?.trim().split(/\s+/)[0] || "Admin";
   } catch {
@@ -64,15 +63,13 @@ const greeting =
       : "Good evening";
 
   const loadStats = useCallback(async () => {
-    if (!stats) {
-  setLoading(true);
-}
+    setLoading(true);
 
 setError("");
 
     const token = localStorage.getItem("ateelabo_token");
 
-    if (!token) {
+    if (!readUser()) {
       setError("Please log in to access the owner dashboard.");
       setLoading(false);
       return;
@@ -81,15 +78,33 @@ setError("");
     try {
       const response = await fetch(`${API_URL}/api/admin/stats`, {
         headers: {
-          Authorization: `Bearer ${token}`,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
       });
 
       
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error || data.message || "Unable to load statistics."
+        );
+      }
+
+      setStats(data);
+      setLastUpdated(new Date());
+    } catch (err) {
+      setError(err.message || "Could not connect to the backend.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
 const updateUserRole = async (userId, newRole) => {
   const token = localStorage.getItem("ateelabo_token");
 
-  if (!token) {
+  if (!readUser()) {
     setError("Please log in again to manage users.");
     return;
   }
@@ -104,7 +119,7 @@ const updateUserRole = async (userId, newRole) => {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({ role: newRole }),
       }
@@ -125,22 +140,6 @@ const updateUserRole = async (userId, newRole) => {
   }
 };
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data.error || data.message || "Unable to load statistics."
-        );
-      }
-
-      setStats(data);
-      setLastUpdated(new Date());
-    } catch (err) {
-      setError(err.message || "Could not connect to the backend.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
 
   useEffect(() => {
   loadStats();
@@ -181,7 +180,7 @@ const deleteUser = async (user) => {
 
   const token = localStorage.getItem("ateelabo_token");
 
-  if (!token) {
+  if (!readUser()) {
     setError("Please log in again to manage users.");
     return;
   }
@@ -195,7 +194,7 @@ const deleteUser = async (user) => {
       {
         method: "DELETE",
         headers: {
-          Authorization: `Bearer ${token}`,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
       }
     );
@@ -769,19 +768,8 @@ const deleteUser = async (user) => {
     
 <select
   value={user.role || "user"}
-  disabled={
-    updatingUserId === user.id ||
-    user.email?.trim().toLowerCase() ===
-      JSON.parse(
-        localStorage.getItem("ateelabo_user") || "{}"
-      ).email?.trim().toLowerCase() ||
-    (
-      JSON.parse(
-        localStorage.getItem("ateelabo_user") || "{}"
-      ).role !== "owner" &&
-      user.role === "admin"
-    )
-  }
+  disabled={updatingUserId === user.id || user.id === readUser()?.id}
+
   onChange={(event) =>
     updateUserRole(user.id, event.target.value)
   }
@@ -1016,7 +1004,7 @@ const deleteUser = async (user) => {
         <div className="rounded-xl border border-white/[0.06] p-4 sm:p-5">
           <h3 className="font-semibold">Daily estimated cost</h3>
           <p className="mt-1 text-xs text-slate-500">
-            Estimated input and output token charges in USD
+            GPT-4o mini estimate only; excludes Gemini and other models
           </p>
 
           <div className="mt-5 max-h-80 space-y-4 overflow-y-auto pr-3">
@@ -1068,9 +1056,7 @@ const deleteUser = async (user) => {
         </div>
 
         <p className="text-xs leading-5 text-slate-500">
-          Cost figures are estimates based on the daily token data returned
-          by the backend and the configured GPT-4o mini rates. They are
-          not live billing data from OpenAI.
+          Cost figures cover recorded OpenAI GPT-4o mini requests only, using illustrative rates of $0.15 per million input tokens and $0.60 per million output tokens. Gemini and other models are excluded. These figures are not provider billing data.
         </p>
       </>
     );
@@ -1086,7 +1072,7 @@ const deleteUser = async (user) => {
                     Token consumption
                   </h2>
                   <p className="mt-1 text-sm text-slate-400">
-                    Breakdown of recorded OpenAI token usage
+                    Breakdown of recorded token usage across providers
                   </p>
                 </div>
 

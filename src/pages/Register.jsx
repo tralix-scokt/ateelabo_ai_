@@ -22,7 +22,7 @@ const [showPassword, setShowPassword] = useState(false);
 
     try {
       const response = await fetch(
-        "http://localhost:5000/api/auth/register",
+        "/api/auth/register",
         {
           method: "POST",
           headers: {
@@ -157,7 +157,7 @@ const [showPassword, setShowPassword] = useState(false);
     onChange={(e) => setPassword(e.target.value)}
     placeholder="Create a password"
     required
-    minLength={6}
+    minLength={8}
     className="w-full rounded-xl bg-black/30 border border-white/10 px-4 py-3 pr-12 outline-none focus:border-cyan-400 transition"
   />
 

@@ -36,7 +36,7 @@ handleLogout,
   animate={{ x: 0, opacity: 1 }}
   transition={{ duration: 0.4 }}
   className="
-    w-[280px]
+    w-full
     h-screen
     flex
     flex-col
@@ -185,8 +185,8 @@ handleLogout,
   <path
     d="M256 49 L112 366 Q106 381 124 392"
     stroke="url(#aHighlight)"
-    stroke-width="4"
-    stroke-linecap="round"
+    strokeWidth="4"
+    strokeLinecap="round"
     filter="url(#softGlow)"
   />
 
@@ -204,7 +204,7 @@ handleLogout,
     ry="76"
     transform="rotate(-19 256 256)"
     stroke="#1268FF"
-    stroke-width="8"
+    strokeWidth="8"
     opacity=".3"
     filter="url(#glow)"
   />
@@ -216,8 +216,8 @@ handleLogout,
        C403 214 438 178 414 157
        C393 139 351 143 316 152"
     stroke="url(#orbitStroke)"
-    stroke-width="5"
-    stroke-linecap="round"
+    strokeWidth="5"
+    strokeLinecap="round"
     filter="url(#glow)"
   />
 
