@@ -61,7 +61,7 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-black to-gray-800 flex items-center justify-center px-4 text-white">
+    <div className="auth-surface min-h-screen bg-gradient-to-br from-gray-900 via-black to-gray-800 flex items-center justify-center px-4 text-white">
 
       <motion.div
         initial={{ opacity: 0, y: 30 }}

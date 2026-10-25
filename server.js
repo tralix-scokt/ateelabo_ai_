@@ -5,6 +5,7 @@ import bcrypt from "bcryptjs";
 import User from "./models/User.js";
 import AIUsage from "./models/AIUsage.js";
 import fetch from "node-fetch";
+import { readEvents } from "./services/eventStream.js";
 import path from "node:path";
 import mongoose from "mongoose";
 import { sessionToken, sessionOptions, sessionName } from "./middleware/session.js";
@@ -341,6 +342,21 @@ app.post("/api/auth/change-password", accountLimiter, passwordInput, async (req,
 
 app.post("/api/chat", chatLimiter, optionalAuth, chatUpload, validateChat, async (req, res) => {
   let filePath = null;
+  const wantsStream = req.headers.accept?.includes("text/event-stream");
+  const upstreamAbort = new AbortController();
+  const disconnect = () => upstreamAbort.abort();
+  res.once("close", disconnect);
+  const upstreamSignal = () => AbortSignal.any([upstreamAbort.signal, AbortSignal.timeout(45000)]);
+  const emit = data => {
+    if (res.destroyed) return;
+    if (!res.headersSent) {
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache, no-transform");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+    }
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
 
   try {
    const { message, fileContext: savedFileContext } = req.body;
@@ -480,7 +496,7 @@ const aiMessage = documentPrompt(message, fileText, savedFileContext);
         "https://api.openai.com/v1/chat/completions",
         {
           method: "POST",
-          signal: AbortSignal.timeout(45000),
+          signal: upstreamSignal(),
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -488,6 +504,7 @@ const aiMessage = documentPrompt(message, fileText, savedFileContext);
           body: JSON.stringify({
             model: process.env.OPENAI_MODEL || "gpt-4o-mini",
             max_tokens: 2048,
+            ...(wantsStream ? { stream: true, stream_options: { include_usage: true } } : {}),
             messages: [
                 {
                   role: "system",
@@ -509,6 +526,21 @@ const aiMessage = documentPrompt(message, fileText, savedFileContext);
     let shouldTryGemini = false;
 
     if (openaiResp?.ok) {
+      if (wantsStream) {
+        try {
+        for await (const event of readEvents(openaiResp.body)) {
+          if (event.error) throw new Error("Provider stream failed");
+          const delta = event.choices?.[0]?.delta?.content;
+          if (typeof delta === "string" && delta) { reply += delta; emit({ type: "delta", text: delta }); }
+          if (typeof event.model === "string") model = event.model;
+          if (event.usage) {
+            promptTokens = event.usage.prompt_tokens ?? 0;
+            completionTokens = event.usage.completion_tokens ?? 0;
+            totalTokens = event.usage.total_tokens ?? 0;
+          }
+        }
+        } catch (error) { if (res.headersSent) throw error; reply = ""; }
+      } else {
       const data = (await openaiResp.json().catch(() => ({}))) || {};
 
       const content = data?.choices?.[0]?.message?.content;
@@ -518,6 +550,7 @@ const aiMessage = documentPrompt(message, fileText, savedFileContext);
       promptTokens = data.usage?.prompt_tokens ?? 0;
       completionTokens = data.usage?.completion_tokens ?? 0;
       totalTokens = data.usage?.total_tokens ?? 0;
+      }
 
       if (!reply) {
         console.error("OpenAI returned no response text.");
@@ -558,10 +591,10 @@ const aiMessage = documentPrompt(message, fileText, savedFileContext);
 
       try {
         const geminiResp = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(process.env.GEMINI_MODEL || "gemini-2.5-flash")}:generateContent`,
+          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(process.env.GEMINI_MODEL || "gemini-2.5-flash")}:${wantsStream ? "streamGenerateContent?alt=sse" : "generateContent"}`,
           {
             method: "POST",
-            signal: AbortSignal.timeout(45000),
+            signal: upstreamSignal(),
             headers: {
               "Content-Type": "application/json",
               "x-goog-api-key": process.env.GEMINI_API_KEY,
@@ -582,7 +615,17 @@ const aiMessage = documentPrompt(message, fileText, savedFileContext);
           }
         );
 
-        const geminiData = await geminiResp.json();
+        let geminiData;
+        let streamedReply = "";
+        if (wantsStream && geminiResp.ok) {
+          for await (const event of readEvents(geminiResp.body)) {
+            if (event.error) throw new Error("Backup provider stream failed");
+            const delta = event.candidates?.[0]?.content?.parts?.map(part => part.text || "").join("") || "";
+            if (delta) { streamedReply += delta; emit({ type: "delta", text: delta }); }
+            geminiData = event;
+          }
+          geminiData ||= {};
+        } else geminiData = await geminiResp.json();
 
         if (!geminiResp.ok) {
   const geminiErrorMessage =
@@ -617,7 +660,7 @@ const aiMessage = documentPrompt(message, fileText, savedFileContext);
   });
 }
 
-        reply =
+        reply = wantsStream ? streamedReply :
           geminiData.candidates?.[0]?.content?.parts
             ?.map((part) => part.text || "")
             .join("") || "";
@@ -644,6 +687,7 @@ const aiMessage = documentPrompt(message, fileText, savedFileContext);
 
         console.log("Gemini fallback succeeded.");
       } catch (error) {
+        if (res.headersSent) throw error;
         console.error("Gemini connection error:", error.message);
 
         return res.status(502).json({
@@ -671,18 +715,28 @@ const aiMessage = documentPrompt(message, fileText, savedFileContext);
       console.error("AI usage tracking failed:", usageError.name);
     }
 
-    res.json({
+    const result = {
       reply,
       fileName: req.file ? req.file.originalname : null,
       fileText: fileText || null,
-    });
+    };
+    if (wantsStream) {
+      emit({ type: "done", ...result });
+      res.end();
+    } else res.json(result);
   } catch (error) {
     console.error("Chat request failed:", error.name);
+    if (res.destroyed) return;
+    if (res.headersSent) {
+      emit({ type: "error", error: "Response interrupted. Please try regenerating." });
+      return res.end();
+    }
 
     res.status([400, 429, 503].includes(error.status) ? error.status : 500).json({
       error: [400, 429, 503].includes(error.status) ? error.message : "Unable to process this request. Please try again.",
     });
   } finally {
+    res.removeListener("close", disconnect);
     // =========================
     // DELETE TEMPORARY FILE
     // =========================
@@ -1032,7 +1086,7 @@ app.get("/test", (req, res) => {
 
 app.use("/api", (_req, res) => res.status(404).json({ error: "API route not found." }));
 // Serve the production frontend and API on the same origin.
-if (process.env.NODE_ENV === "production") {
+if (process.env.NODE_ENV === "production" && !process.env.VERCEL) {
   const dist = fileURLToPath(new URL("./dist/", import.meta.url));
   app.use(express.static(dist));
   app.get("/{*path}", (_req, res) => res.sendFile(path.join(dist, "index.html")));

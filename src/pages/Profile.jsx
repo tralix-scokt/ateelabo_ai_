@@ -97,7 +97,7 @@ const fileInputRef = useRef(null);
   if (!currentUser) return <div className="p-8 text-white">Please <Link to="/login">log in</Link> to manage your profile.</div>;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-black to-gray-800 text-white px-4 py-8">
+    <div className="auth-surface min-h-screen bg-gradient-to-br from-gray-900 via-black to-gray-800 text-white px-4 py-8">
 
       {/* Header */}
       <div className="max-w-3xl mx-auto">

@@ -12,7 +12,7 @@ const [saveHistory, setSaveHistory] = useState(
 
 
   return (
-    <div className="min-h-screen bg-[#070a12] text-white px-4 py-8 sm:px-6">
+    <div className="auth-surface min-h-screen bg-[#070a12] text-white px-4 py-8 sm:px-6">
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -142,11 +142,11 @@ const [saveHistory, setSaveHistory] = useState(
                 </p>
 
                 <p className="text-sm text-gray-500">
-                  Responses are currently delivered when complete
+                  Responses stream live when supported by the selected provider
                 </p>
               </div>
 
-              <span className="text-sm text-gray-400">Not available</span>
+              <span className="text-sm text-cyan-300">Enabled automatically</span>
             </div>
 
           </div>

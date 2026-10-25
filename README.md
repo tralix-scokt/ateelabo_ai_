@@ -54,7 +54,7 @@ Profile name/picture updates are persisted on the server. Email changes are not 
 
 History and document context are local to this browser, separated by account ID or guest. Clearing browser data still removes them; this is not cloud synchronization or protection against somebody with access to your browser profile. Existing unscoped `ateelabo_chats` data is preserved, not automatically assigned to any account. Settings provides an explicit legacy backup download.
 
-Disabling history stops future disk writes; it does not erase old saves. Unsupported speech recognition disables only voice input. Enter-to-send is persisted and honored. Unsupported streaming/model/theme controls no longer pretend to change server behavior. Reactions are stored locally, not sent as provider feedback.
+Disabling history stops future disk writes; it does not erase old saves. Unsupported speech recognition disables only voice input. Enter-to-send is persisted and honored. Streaming responses use actual provider SSE events with JSON compatibility for older clients. Model selection remains server-managed and non-dark theme controls are not offered. Reactions are stored locally, not sent as provider feedback.
 
 ## Verification
 
@@ -64,3 +64,16 @@ Disabling history stops future disk writes; it does not erase old saves. Unsuppo
 - `npm audit`: dependency advisory check.
 
 Mocks and jsdom are not substitutes for a real MongoDB concurrency test, paid-provider test, browser voice/microphone test, or production hosting verification. See `BUG_HUNT_REPORT.md` for the completed pass and rollout checklist.
+
+## Vercel deployment adapter
+
+`vercel.json` deploys the Vite frontend and `api/index.js` as a Node function. The handler caches MongoDB connections between warm invocations, and API requests fail safely with 503 until `MONGO_URI` and a unique `JWT_SECRET` (32+ characters) are configured. Set `OPENAI_API_KEY` and/or `GEMINI_API_KEY` in the **Vercel project's environment settings**, never in chat or source. Redeploy after changing them. Other limits/model/owner settings from `.env.example` are optional overrides.
+
+On Vercel, uploads use `/tmp` and are capped at **3 MB** to leave room under the platform's request-body limit. Extraction worker source/dependencies are included in the function bundle. Function maximum duration is 120 seconds; parser subprocess limits still apply. This adapter supersedes the earlier warning about needing a persistent host, but does not make quotas, native memory, or cold-start behavior equivalent to a dedicated server. Short-term limits remain per function instance; MongoDB daily budgets remain shared. `/api/health` reports configuration presence, not successful connectivity. Verify real credentials, network access and PDF/DOCX extraction on the live deployment before launch.
+
+
+## Cinematic interface upgrade
+
+The chat workspace now uses a lightweight SVG/CSS 2D identity, a session-once cinematic intro, cyan/violet glass surfaces, responsive navigation and reduced-motion styling. No 3D models or remotely loaded visual assets are used. Copy, local reactions, read-aloud, account management, search/pin/rename/delete, upload analysis, sidebar resize/swipe and browser voice input are retained. Regenerate replaces the most recent answer using the original question and bounded conversation/document context; it consumes the normal backend allowance. Stop aborts the browser request and upstream provider connection. No mock responses are used by the application.
+
+`Accept: text/event-stream` on `/api/chat` enables streamed `delta`, `done` (final reply/document metadata) and `error` frames. OpenAI and Gemini fallback both use native provider streams. Requests without this header retain JSON responses. Predefined identity replies and configuration/provider errors before generation also retain JSON responses. New tests cover provider streaming, fragmented UTF-8/SSE, intro entry, regeneration and streamed history persistence. Live paid-provider verification still requires valid credentials.
