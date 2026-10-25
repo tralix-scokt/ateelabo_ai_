@@ -77,3 +77,13 @@ On Vercel, uploads use `/tmp` and are capped at **3 MB** to leave room under the
 The chat workspace now uses a lightweight SVG/CSS 2D identity, a session-once cinematic intro, cyan/violet glass surfaces, responsive navigation and reduced-motion styling. No 3D models or remotely loaded visual assets are used. Copy, local reactions, read-aloud, account management, search/pin/rename/delete, upload analysis, sidebar resize/swipe and browser voice input are retained. Regenerate replaces the most recent answer using the original question and bounded conversation/document context; it consumes the normal backend allowance. Stop aborts the browser request and upstream provider connection. No mock responses are used by the application.
 
 `Accept: text/event-stream` on `/api/chat` enables streamed `delta`, `done` (final reply/document metadata) and `error` frames. OpenAI and Gemini fallback both use native provider streams. Requests without this header retain JSON responses. Predefined identity replies and configuration/provider errors before generation also retain JSON responses. New tests cover provider streaming, fragmented UTF-8/SSE, intro entry, regeneration and streamed history persistence. Live paid-provider verification still requires valid credentials.
+
+### Appearance and mobile layouts
+Settings → Appearance offers Obsidian black, Lunar white, Cyber cyan, Nebula violet,
+and Aurora green. A custom glow picker changes the accent without changing the
+readable body-text palette. Preferences are stored locally in `ateelabo_appearance`,
+restore on page load, and synchronize with other tabs on the same browser.
+Storage restrictions do not prevent applying a theme for the current page.
+
+Layouts support narrow screens, wrapped long messages/URLs, scrollable composer
+text, landscape/short viewports and normal browser zoom. Browser zoom is not disabled.
