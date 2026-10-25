@@ -1032,7 +1032,7 @@ app.get("/test", (req, res) => {
 
 app.use("/api", (_req, res) => res.status(404).json({ error: "API route not found." }));
 // Serve the production frontend and API on the same origin.
-if (process.env.NODE_ENV === "production") {
+if (process.env.NODE_ENV === "production" && !process.env.VERCEL) {
   const dist = fileURLToPath(new URL("./dist/", import.meta.url));
   app.use(express.static(dist));
   app.get("/{*path}", (_req, res) => res.sendFile(path.join(dist, "index.html")));

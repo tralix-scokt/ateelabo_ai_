@@ -16,6 +16,8 @@ import AdminDashboard from "./pages/AdminDashboard";
 
 
 
+const maxUploadMB = Number(import.meta.env.VITE_MAX_UPLOAD_MB || 10);
+
 export default function App() {
 
   const location = useLocation();
@@ -148,8 +150,8 @@ const handleFileUpload = (e) => {
   if (!file) return;
 
   e.target.value = "";
-  if (!/\.(pdf|docx)$/i.test(file.name) || file.size > 10 * 1024 * 1024) {
-    alert("Choose a PDF or DOCX file no larger than 10 MB.");
+  if (!/\.(pdf|docx)$/i.test(file.name) || file.size > maxUploadMB * 1024 * 1024) {
+    alert(`Choose a PDF or DOCX file no larger than ${maxUploadMB} MB.`);
     return;
   }
   setUploadedFile(file);

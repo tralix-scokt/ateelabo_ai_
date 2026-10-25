@@ -64,3 +64,9 @@ Disabling history stops future disk writes; it does not erase old saves. Unsuppo
 - `npm audit`: dependency advisory check.
 
 Mocks and jsdom are not substitutes for a real MongoDB concurrency test, paid-provider test, browser voice/microphone test, or production hosting verification. See `BUG_HUNT_REPORT.md` for the completed pass and rollout checklist.
+
+## Vercel deployment adapter
+
+`vercel.json` deploys the Vite frontend and `api/index.js` as a Node function. The handler caches MongoDB connections between warm invocations, and API requests fail safely with 503 until `MONGO_URI` and a unique `JWT_SECRET` (32+ characters) are configured. Set `OPENAI_API_KEY` and/or `GEMINI_API_KEY` in the **Vercel project's environment settings**, never in chat or source. Redeploy after changing them. Other limits/model/owner settings from `.env.example` are optional overrides.
+
+On Vercel, uploads use `/tmp` and are capped at **3 MB** to leave room under the platform's request-body limit. Extraction worker source/dependencies are included in the function bundle. Function maximum duration is 120 seconds; parser subprocess limits still apply. This adapter supersedes the earlier warning about needing a persistent host, but does not make quotas, native memory, or cold-start behavior equivalent to a dedicated server. Short-term limits remain per function instance; MongoDB daily budgets remain shared. `/api/health` reports configuration presence, not successful connectivity. Verify real credentials, network access and PDF/DOCX extraction on the live deployment before launch.
