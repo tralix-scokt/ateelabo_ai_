@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import multer from "multer";
 import { parseHistory } from "../services/chatContext.js";
 import rateLimit from "express-rate-limit";
@@ -11,9 +13,12 @@ export const chatLimiter = rateLimit({
   message: { error: "Too many chat requests. Please try again later." },
 });
 
+const maxUploadMB = process.env.VERCEL ? 3 : 10;
+const uploadDirectory = process.env.VERCEL ? path.join(os.tmpdir(), "ateelabo-uploads") : "uploads/";
+fs.mkdirSync(uploadDirectory, { recursive: true });
 const upload = multer({
-  dest: "uploads/",
-  limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 4, fieldSize: 256 * 1024 },
+  dest: uploadDirectory,
+  limits: { fileSize: maxUploadMB * 1024 * 1024, files: 1, fields: 4, fieldSize: 256 * 1024 },
   fileFilter: (_req, file, cb) => {
     const name = file.originalname.toLowerCase();
     const supported =
@@ -29,8 +34,8 @@ export function chatUpload(req, res, next) {
     if (!error) return next();
     return res.status(error.code === "LIMIT_FILE_SIZE" ? 413 : 400).json({
       error: error.code === "LIMIT_FILE_SIZE"
-        ? "File exceeds the 10 MB limit."
-        : "Upload rejected. Use one PDF or DOCX file (maximum 10 MB).",
+        ? `File exceeds the ${maxUploadMB} MB limit.`
+        : `Upload rejected. Use one PDF or DOCX file (maximum ${maxUploadMB} MB).`,
     });
   });
 }
