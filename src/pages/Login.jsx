@@ -21,7 +21,7 @@ export default function Login() {
 
     try {
       const response = await fetch(
-        "http://localhost:5000/api/auth/login",
+        "/api/auth/login",
         {
           method: "POST",
           headers: {
@@ -45,7 +45,7 @@ export default function Login() {
         "ateelabo_user",
         JSON.stringify(data.user)
       );
-      localStorage.setItem("ateelabo_token", data.token);
+      localStorage.removeItem("ateelabo_token");
 
       // Go to Ateelabo AI
       navigate("/", {

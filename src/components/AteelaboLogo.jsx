@@ -40,31 +40,31 @@ export default function AteelaboLogo({ size = "w-24 h-24" }) {
 >
   <defs>
     <linearGradient id="aBody" x1="100" y1="80" x2="410" y2="430" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#75F8FF"/>
-      <stop offset=".25" stop-color="#00CFFF"/>
-      <stop offset=".58" stop-color="#245BFF"/>
-      <stop offset=".82" stop-color="#743CFF"/>
-      <stop offset="1" stop-color="#E35CFF"/>
+      <stop offset="0" stopColor="#75F8FF"/>
+      <stop offset=".25" stopColor="#00CFFF"/>
+      <stop offset=".58" stopColor="#245BFF"/>
+      <stop offset=".82" stopColor="#743CFF"/>
+      <stop offset="1" stopColor="#E35CFF"/>
     </linearGradient>
 
     <linearGradient id="aHighlight" x1="170" y1="120" x2="335" y2="410" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FFFFFF"/>
-      <stop offset=".35" stop-color="#6DF5FF"/>
-      <stop offset="1" stop-color="#6C5CFF"/>
+      <stop stopColor="#FFFFFF"/>
+      <stop offset=".35" stopColor="#6DF5FF"/>
+      <stop offset="1" stopColor="#6C5CFF"/>
     </linearGradient>
 
     <linearGradient id="orbitStroke" x1="60" y1="320" x2="450" y2="180" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#008CFF"/>
-      <stop offset=".45" stop-color="#62FFFF"/>
-      <stop offset=".75" stop-color="#258CFF"/>
-      <stop offset="1" stop-color="#C16BFF"/>
+      <stop stopColor="#008CFF"/>
+      <stop offset=".45" stopColor="#62FFFF"/>
+      <stop offset=".75" stopColor="#258CFF"/>
+      <stop offset="1" stopColor="#C16BFF"/>
     </linearGradient>
 
     <radialGradient id="planetFill" cx="0" cy="0" r="1" gradientTransform="translate(374 174) rotate(45) scale(72)" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FFFFFF"/>
-      <stop offset=".25" stop-color="#7BF8FF"/>
-      <stop offset=".58" stop-color="#248CFF"/>
-      <stop offset="1" stop-color="#873EFF"/>
+      <stop stopColor="#FFFFFF"/>
+      <stop offset=".25" stopColor="#7BF8FF"/>
+      <stop offset=".58" stopColor="#248CFF"/>
+      <stop offset="1" stopColor="#873EFF"/>
     </radialGradient>
 
     <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
@@ -104,8 +104,8 @@ export default function AteelaboLogo({ size = "w-24 h-24" }) {
   <path
     d="M256 49 L112 366 Q106 381 124 392"
     stroke="url(#aHighlight)"
-    stroke-width="4"
-    stroke-linecap="round"
+    strokeWidth="4"
+    strokeLinecap="round"
     filter="url(#softGlow)"
   />
 
@@ -123,7 +123,7 @@ export default function AteelaboLogo({ size = "w-24 h-24" }) {
     ry="76"
     transform="rotate(-19 256 256)"
     stroke="#1268FF"
-    stroke-width="8"
+    strokeWidth="8"
     opacity=".3"
     filter="url(#glow)"
   />
@@ -135,8 +135,8 @@ export default function AteelaboLogo({ size = "w-24 h-24" }) {
        C403 214 438 178 414 157
        C393 139 351 143 316 152"
     stroke="url(#orbitStroke)"
-    stroke-width="5"
-    stroke-linecap="round"
+    strokeWidth="5"
+    strokeLinecap="round"
     filter="url(#glow)"
   />
 

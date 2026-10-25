@@ -5,26 +5,27 @@ import bcrypt from "bcryptjs";
 import User from "./models/User.js";
 import AIUsage from "./models/AIUsage.js";
 import fetch from "node-fetch";
-import multer from "multer";
+import path from "node:path";
+import mongoose from "mongoose";
+import { sessionToken, sessionOptions, sessionName } from "./middleware/session.js";
+import { registrationInput, passwordInput } from "./middleware/authValidation.js";
+import { pricedTokenFields, estimateCost } from "./services/costEstimate.js";
+import { documentPrompt } from "./services/chatContext.js";
+import { fileURLToPath } from "node:url";
+import { chatLimiter, chatUpload, validateChat } from "./middleware/chatSafety.js";
 import fs from "fs";
-import mammoth from "mammoth";
-import { PDFParse } from "pdf-parse";
+import { reserveChatBudget } from "./services/requestBudget.js";
+import { extractDocument } from "./services/extractDocument.js";
 import connectDB from "./db.js";
 import jwt from "jsonwebtoken";
 import rateLimit from "express-rate-limit";
 
 dotenv.config();
 
-if (!process.env.JWT_SECRET) {
-  throw new Error(
-    "FATAL: JWT_SECRET is missing from your environment configuration."
-  );
-}
-
-
-connectDB();
-
-const app = express();
+export const app = express();
+app.disable("x-powered-by");
+// Configure only networks belonging to your actual reverse proxy.
+if (process.env.TRUST_PROXY) app.set("trust proxy", process.env.TRUST_PROXY.split(",").map(value => value.trim()));
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -46,10 +47,7 @@ const loginLimiter = rateLimit({
 
 const requireAdmin = async (req, res, next) => {
   try {
-    const authHeader = req.headers.authorization;
-    const token = authHeader?.startsWith("Bearer ")
-      ? authHeader.slice(7)
-      : null;
+    const token = sessionToken(req);
 
     if (!token) {
       return res.status(401).json({
@@ -57,13 +55,7 @@ const requireAdmin = async (req, res, next) => {
       });
     }
 
-    if (!process.env.JWT_SECRET || !process.env.ADMIN_EMAIL) {
-      return res.status(500).json({
-        message: "Admin authentication is not configured.",
-      });
-    }
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ["HS256"] });
 
     const user = await User.findById(decoded.userId);
 
@@ -73,24 +65,10 @@ const requireAdmin = async (req, res, next) => {
       });
     }
 
-    const adminEmail = process.env.ADMIN_EMAIL
-  .trim()
-  .toLowerCase();
-
-const userEmail = user.email
-  ?.trim()
-  .toLowerCase();
-
-if (
-  !adminEmail ||
-  !userEmail ||
-  userEmail !== adminEmail ||
-  user.role !== "admin"
-) {
-  return res.status(403).json({
-    message: "Admin access denied.",
-  });
-}
+    if ((decoded.tokenVersion ?? 0) !== (user.tokenVersion ?? 0)) {
+      return res.status(401).json({ message: "Session expired. Please log in again." });
+    }
+    if (user.role !== "admin") return res.status(403).json({ message: "Admin access denied." });
 
     req.adminUser = user;
     next();
@@ -103,33 +81,18 @@ if (
 
 
 async function optionalAuth(req, res, next) {
-  const authHeader = req.headers.authorization;
-
-  // Allow anonymous AI requests, but don't attribute them to a user.
-  if (!authHeader) {
+  const token = sessionToken(req);
+  if (!token && !req.headers.authorization && !req.headers.cookie?.includes(`${sessionName}=`)) {
     req.user = null;
     return next();
   }
-
-  if (!authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({
-      error: "Invalid authorization header.",
-    });
-  }
-
-  const token = authHeader.slice(7).trim();
-
-  if (!token) {
-    return res.status(401).json({
-      error: "Authentication token is missing.",
-    });
-  }
+  if (!token) return res.status(401).json({ error: "Invalid authentication credentials." });
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ["HS256"] });
 
     const user = await User.findById(decoded.userId).select(
-      "_id name email role"
+      "_id name email role tokenVersion"
     );
 
     if (!user) {
@@ -138,6 +101,9 @@ async function optionalAuth(req, res, next) {
       });
     }
 
+    if ((decoded.tokenVersion ?? 0) !== (user.tokenVersion ?? 0)) {
+      return res.status(401).json({ error: "Session expired. Please log in again." });
+    }
     req.user = user;
     return next();
   } catch (error) {
@@ -149,12 +115,24 @@ async function optionalAuth(req, res, next) {
 
 
 app.use(cors({
-  origin: "http://localhost:5173",
+  credentials: true,
+  origin: (process.env.CORS_ORIGINS || "http://localhost:5173").split(",").map(value => value.trim()),
 }));
 
-app.use(express.json());
+app.use(express.json({ limit: "512kb" }));
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "same-origin");
+  if (_req.path.startsWith("/api")) res.setHeader("Cache-Control", "no-store");
+  next();
+});
+const accountLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, limit: 10,
+  standardHeaders: "draft-8", legacyHeaders: false,
+  message: { message: "Too many account requests. Please try again later." },
+});
 
-app.post("/api/auth/register", async (req, res) => {
+app.post("/api/auth/register", accountLimiter, registrationInput, async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
@@ -193,7 +171,8 @@ app.post("/api/auth/register", async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Register error:", error);
+    if (error.code === 11000) return res.status(409).json({ message: "User already exists" });
+    console.error("Register failed:", error.name);
 
     res.status(500).json({
       message: "Server error",
@@ -268,29 +247,15 @@ if (password.length === 0 || password.length > 128) {
       });
     }
 
-    // Promote only the account matching the configured owner email
-    const adminEmail = process.env.ADMIN_EMAIL
-      ?.trim()
-      .toLowerCase();
-
-    if (
-      adminEmail &&
-      normalizedEmail === adminEmail &&
-      user.role !== "admin"
-    ) {
-      user.role = "admin";
-      await user.save();
-    }
-
     // Issue a signed token after successful authentication
     const token = jwt.sign(
-      { userId: user._id.toString() },
+      { userId: user._id.toString(), tokenVersion: user.tokenVersion ?? 0 },
       process.env.JWT_SECRET,
       { expiresIn: "7d" }
     );
 
+    res.cookie(sessionName, token, { ...sessionOptions(), maxAge: 7 * 24 * 60 * 60 * 1000 });
     return res.json({
-      token,
       message: "Login successful",
       user: {
         id: user._id,
@@ -301,7 +266,7 @@ if (password.length === 0 || password.length > 128) {
       },
     });
   } catch (error) {
-    console.error("Login error:", error);
+    console.error("Login failed:", error.name);
 
     return res.status(500).json({
       message: "Server error",
@@ -309,7 +274,25 @@ if (password.length === 0 || password.length > 128) {
   }
 });
 
-app.post("/api/auth/change-password", async (req, res) => {
+app.post("/api/auth/logout", (_req, res) => {
+  res.clearCookie(sessionName, sessionOptions());
+  res.json({ message: "Logged out." });
+});
+
+app.patch("/api/auth/profile", optionalAuth, async (req, res) => {
+  if (!req.user) return res.status(401).json({ message: "Authentication required." });
+  const { name, profilePicture = "" } = req.body || {};
+  if (typeof name !== "string" || !name.trim() || name.trim().length > 100 ||
+      typeof profilePicture !== "string" || profilePicture.length > 150000 ||
+      (profilePicture && !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(profilePicture))) {
+    return res.status(400).json({ message: "Provide a name (1–100 characters) and PNG, JPEG or WebP picture under 110 KB." });
+  }
+  const user = await User.findByIdAndUpdate(req.user._id, { name: name.trim(), profilePicture }, { new: true }).select("_id name email role profilePicture");
+  if (!user) return res.status(401).json({ message: "Account not found." });
+  res.json({ user: { id: user._id.toString(), name: user.name, email: user.email, role: user.role, profilePicture: user.profilePicture } });
+});
+
+app.post("/api/auth/change-password", accountLimiter, passwordInput, async (req, res) => {
   try {
     const { email, currentPassword, newPassword } = req.body;
 
@@ -319,17 +302,11 @@ app.post("/api/auth/change-password", async (req, res) => {
       });
     }
 
-    if (newPassword.length < 6) {
-      return res.status(400).json({
-        message: "New password must be at least 6 characters",
-      });
-    }
-
     const user = await User.findOne({ email });
 
     if (!user) {
-      return res.status(404).json({
-        message: "User not found",
+      return res.status(401).json({
+        message: "Invalid email or current password",
       });
     }
 
@@ -340,19 +317,21 @@ app.post("/api/auth/change-password", async (req, res) => {
 
     if (!isPasswordCorrect) {
       return res.status(401).json({
-        message: "Current password is incorrect",
+        message: "Invalid email or current password",
       });
     }
 
     user.password = await bcrypt.hash(newPassword, 10);
+    user.tokenVersion = (user.tokenVersion ?? 0) + 1;
+    res.clearCookie(sessionName, sessionOptions());
 
     await user.save();
 
     res.json({
-      message: "Password changed successfully",
+      message: "Password changed successfully. Please log in again.",
     });
   } catch (error) {
-    console.error("Change password error:", error);
+    console.error("Change password failed:", error.name);
 
     res.status(500).json({
       message: "Server error",
@@ -360,29 +339,19 @@ app.post("/api/auth/change-password", async (req, res) => {
   }
 });
 
-const upload = multer({
-  dest: "uploads/",
-});
-
-
-app.post("/api/chat", optionalAuth, upload.single("file"), async (req, res) => {
+app.post("/api/chat", chatLimiter, optionalAuth, chatUpload, validateChat, async (req, res) => {
   let filePath = null;
 
   try {
    const { message, fileContext: savedFileContext } = req.body;
-    console.log("Message:", message);
+
 
 const identityReply = getAteelaboIdentityReply(message);
 
-console.log("IDENTITY DEBUG:", {
-  message,
-  identityReply,
-  hasFile: Boolean(req.file),
-  hasSavedContext: Boolean(savedFileContext),
-});
+
 
 if (identityReply && !req.file && !savedFileContext) {
-  console.log("IDENTITY HANDLER ACTIVATED");
+
 
   return res.json({
     reply: identityReply,
@@ -391,6 +360,9 @@ if (identityReply && !req.file && !savedFileContext) {
   });
 }
 
+    // Reserve attempted provider work atomically, across restarts and replicas.
+    if (req.file) filePath = req.file.path;
+    await reserveChatBudget(req);
     let fileText = "";
 
     
@@ -402,54 +374,10 @@ if (identityReply && !req.file && !savedFileContext) {
     if (req.file) {
       filePath = req.file.path;
 
-      console.log("File received:", req.file.originalname);
 
-      // =========================
-      // PDF
-      // =========================
 
-      if (
-        req.file.mimetype === "application/pdf" ||
-        req.file.originalname.toLowerCase().endsWith(".pdf")
-      ) {
-        const buffer = fs.readFileSync(filePath);
-
-        const parser = new PDFParse({
-          data: buffer,
-        });
-
-        const pdfData = await parser.getText();
-
-        fileText = pdfData.text;
-
-        await parser.destroy();
-
-        console.log("PDF text extracted successfully.");
-      }
-
-      // =========================
-      // DOCX
-      // =========================
-
-      else if (
-        req.file.mimetype ===
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-        req.file.originalname.toLowerCase().endsWith(".docx")
-      ) {
-        const result = await mammoth.extractRawText({
-          path: filePath,
-        });
-
-        fileText = result.value;
-
-        console.log("DOCX text extracted successfully.");
-      }
-
-      else {
-        return res.status(400).json({
-          error: "Only PDF and DOCX files are supported.",
-        });
-      }
+      const type = req.file.originalname.toLowerCase().endsWith(".pdf") ? "pdf" : "docx";
+      fileText = await extractDocument(filePath, type);
     }
 
     // =========================
@@ -527,33 +455,15 @@ function getAteelaboIdentityReply(message) {
   return "I am Ateelabo AI, an AI assistant created and developed by Zahraddeen Sani. I help users with questions, learning, writing, programming, and many other tasks.";
 }
 
-let aiMessage = message || "";
+const aiMessage = documentPrompt(message, fileText, savedFileContext);
 
-if (savedFileContext && !req.file) {
-  aiMessage = `
-
-The user previously uploaded a document.
-
-DOCUMENT CONTENT:
-----------------
-${savedFileContext.slice(0, 30000)}
-----------------
-
-USER QUESTION:
-${message || "Please analyze this document."}
-
-Answer the user's question using the document content above.
-`;
-}
-
-    
     // =========================
     // OPENAI PRIMARY + GEMINI FALLBACK
     // =========================
 
     let reply = "";
     let provider = "openai";
-    let model = "gpt-4o-mini";
+    let model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
     let promptTokens = 0;
     let completionTokens = 0;
@@ -570,17 +480,20 @@ Answer the user's question using the document content above.
         "https://api.openai.com/v1/chat/completions",
         {
           method: "POST",
+          signal: AbortSignal.timeout(45000),
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
           },
           body: JSON.stringify({
-            model: "gpt-4o-mini",
+            model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+            max_tokens: 2048,
             messages: [
                 {
                   role: "system",
                   content: ateelaboIdentity,
                 },
+                ...req.chatHistory,
                 {
                   role: "user",
                   content: aiMessage,
@@ -596,10 +509,11 @@ Answer the user's question using the document content above.
     let shouldTryGemini = false;
 
     if (openaiResp?.ok) {
-      const data = await openaiResp.json();
+      const data = (await openaiResp.json().catch(() => ({}))) || {};
 
-      reply = data.choices?.[0]?.message?.content || "";
-      model = data.model || "gpt-4o-mini";
+      const content = data?.choices?.[0]?.message?.content;
+      reply = typeof content === "string" ? content.trim() : "";
+      model = typeof data?.model === "string" ? data.model : model;
 
       promptTokens = data.usage?.prompt_tokens ?? 0;
       completionTokens = data.usage?.completion_tokens ?? 0;
@@ -644,9 +558,10 @@ Answer the user's question using the document content above.
 
       try {
         const geminiResp = await fetch(
-          "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
+          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(process.env.GEMINI_MODEL || "gemini-2.5-flash")}:generateContent`,
           {
             method: "POST",
+            signal: AbortSignal.timeout(45000),
             headers: {
               "Content-Type": "application/json",
               "x-goog-api-key": process.env.GEMINI_API_KEY,
@@ -655,7 +570,9 @@ Answer the user's question using the document content above.
               systemInstruction: {
                   parts: [{ text: ateelaboIdentity }],
                 },
+                generationConfig: { maxOutputTokens: 2048 },
                 contents: [
+                  ...req.chatHistory.map(item => ({ role: item.role === "assistant" ? "model" : "user", parts: [{ text: item.content }] })),
                   {
                     role: "user",
                     parts: [{ text: aiMessage }],
@@ -705,14 +622,14 @@ Answer the user's question using the document content above.
             ?.map((part) => part.text || "")
             .join("") || "";
 
-        if (!reply) {
+        if (!reply.trim()) {
           return res.status(502).json({
             error: "Gemini did not return a usable response.",
           });
         }
 
         provider = "gemini";
-        model = geminiData.modelVersion || "gemini-3.6-flash";
+        model = geminiData.modelVersion || (process.env.GEMINI_MODEL || "gemini-2.5-flash");
 
         console.log("Selected Gemini model:", model);
 
@@ -751,7 +668,7 @@ Answer the user's question using the document content above.
       });
     } catch (usageError) {
       // Analytics failures must not interrupt the AI chat.
-      console.error("AI usage tracking error:", usageError);
+      console.error("AI usage tracking failed:", usageError.name);
     }
 
     res.json({
@@ -760,10 +677,10 @@ Answer the user's question using the document content above.
       fileText: fileText || null,
     });
   } catch (error) {
-    console.error("Server Error:", error);
+    console.error("Chat request failed:", error.name);
 
-    res.status(500).json({
-      error: error.message,
+    res.status([400, 429, 503].includes(error.status) ? error.status : 500).json({
+      error: [400, 429, 503].includes(error.status) ? error.message : "Unable to process this request. Please try again.",
     });
   } finally {
     // =========================
@@ -791,16 +708,12 @@ app.get("/api/admin/stats", requireAdmin, async (req, res) => {
     const now = new Date();
 
     const today = new Date(now);
-    today.setHours(0, 0, 0, 0);
+    today.setUTCHours(0, 0, 0, 0);
 
-    const monthStart = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      1
-    );
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 
     const sevenDaysAgo = new Date(today);
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+    sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 6);
 
     // Registration statistics
     const totalUsers = await User.countDocuments();
@@ -828,6 +741,7 @@ app.get("/api/admin/stats", requireAdmin, async (req, res) => {
   {
     $group: {
       _id: null,
+      ...pricedTokenFields,
       totalTokens: { $sum: "$totalTokens" },
       promptTokens: { $sum: "$promptTokens" },
       completionTokens: { $sum: "$completionTokens" },
@@ -867,15 +781,7 @@ app.get("/api/admin/stats", requireAdmin, async (req, res) => {
       geminiRequests: 0,
     };
 
-        const estimatedAICostUSD = Number(
-  (
-    (
-      Number(aiTokenUsage?.promptTokens ?? 0) * 0.15 +
-      Number(aiTokenUsage?.completionTokens ?? 0) * 0.60
-    ) /
-    1_000_000
-  ).toFixed(6)
-);
+    const estimatedAICostUSD = estimateCost(tokenTotals[0]);
 
     // Seven-day request and token history
     const dailyUsage = await AIUsage.aggregate([
@@ -893,6 +799,7 @@ app.get("/api/admin/stats", requireAdmin, async (req, res) => {
               date: "$createdAt",
             },
           },
+          ...pricedTokenFields,
           requests: { $sum: 1 },
           promptTokens: { $sum: "$promptTokens" },
           completionTokens: { $sum: "$completionTokens" },
@@ -907,12 +814,12 @@ app.get("/api/admin/stats", requireAdmin, async (req, res) => {
 
     for (let i = 0; i < 7; i++) {
       const date = new Date(sevenDaysAgo);
-      date.setDate(date.getDate() + i);
+      date.setUTCDate(date.getUTCDate() + i);
 
       const dateKey = [
-        date.getFullYear(),
-        String(date.getMonth() + 1).padStart(2, "0"),
-        String(date.getDate()).padStart(2, "0"),
+        date.getUTCFullYear(),
+        String(date.getUTCMonth() + 1).padStart(2, "0"),
+        String(date.getUTCDate()).padStart(2, "0"),
       ].join("-");
 
       const existing = dailyUsage.find(
@@ -928,12 +835,7 @@ dailyAIUsage.push({
   promptTokens,
   completionTokens,
   totalTokens: existing?.totalTokens ?? 0,
-  estimatedCostUSD: Number(
-    (
-      (promptTokens * 0.15 + completionTokens * 0.60) /
-      1_000_000
-    ).toFixed(6)
-  ),
+  estimatedCostUSD: estimateCost(existing),
 });
     }
 
@@ -1011,7 +913,7 @@ dailyAIUsage.push({
 });
 
   } catch (error) {
-    console.error("Admin stats error:", error);
+    console.error("Admin stats failed:", error.name);
 
     res.status(500).json({
       message: "Could not load dashboard statistics.",
@@ -1023,6 +925,7 @@ dailyAIUsage.push({
 app.patch("/api/admin/users/:id/role", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) return res.status(400).json({ message: "Invalid user ID." });
     const { role } = req.body;
 
     // Accept only the two supported roles.
@@ -1045,7 +948,7 @@ app.patch("/api/admin/users/:id/role", requireAdmin, async (req, res) => {
     const ownerEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
 
     if (
-      targetUser.email?.trim().toLowerCase() === ownerEmail &&
+      (targetUser.email?.trim().toLowerCase() === ownerEmail || targetUser._id.toString() === req.adminUser._id.toString()) &&
       role !== "admin"
     ) {
       return res.status(403).json({
@@ -1067,7 +970,7 @@ app.patch("/api/admin/users/:id/role", requireAdmin, async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Update user role error:", error);
+    console.error("Update user role failed:", error.name);
 
     return res.status(500).json({
       message: "Could not update the user role.",
@@ -1078,6 +981,7 @@ app.patch("/api/admin/users/:id/role", requireAdmin, async (req, res) => {
 app.delete("/api/admin/users/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) return res.status(400).json({ message: "Invalid user ID." });
 
     const targetUser = await User.findById(id);
 
@@ -1090,7 +994,7 @@ app.delete("/api/admin/users/:id", requireAdmin, async (req, res) => {
     const ownerEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
 
     if (
-      targetUser.email?.trim().toLowerCase() === ownerEmail
+      targetUser.email?.trim().toLowerCase() === ownerEmail || targetUser._id.toString() === req.adminUser._id.toString()
     ) {
       return res.status(403).json({
         message: "The owner account cannot be deleted.",
@@ -1103,7 +1007,7 @@ app.delete("/api/admin/users/:id", requireAdmin, async (req, res) => {
       message: "User account deleted successfully.",
     });
   } catch (error) {
-    console.error("Delete user error:", error);
+    console.error("Delete user failed:", error.name);
 
     return res.status(500).json({
       message: "Could not delete the user account.",
@@ -1126,6 +1030,27 @@ app.get("/test", (req, res) => {
 // START SERVER
 // =========================
 
-app.listen(5000, () => {
-  console.log("Server running on http://localhost:5000");
+app.use("/api", (_req, res) => res.status(404).json({ error: "API route not found." }));
+// Serve the production frontend and API on the same origin.
+if (process.env.NODE_ENV === "production") {
+  const dist = fileURLToPath(new URL("./dist/", import.meta.url));
+  app.use(express.static(dist));
+  app.get("/{*path}", (_req, res) => res.sendFile(path.join(dist, "index.html")));
+}
+
+// JSON errors keep API clients from receiving Express HTML error pages.
+app.use((error, _req, res, _next) => {
+  const status = error.type === "entity.too.large" ? 413 : error.type === "entity.parse.failed" ? 400 : 500;
+  res.status(status).json({ error: status === 413 ? "Request too large." : status === 400 ? "Invalid JSON." : "Internal server error." });
 });
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32 || process.env.JWT_SECRET.startsWith("replace-with") || !process.env.MONGO_URI) {
+    throw new Error("MONGO_URI and a unique JWT_SECRET of at least 32 characters are required.");
+  }
+  await connectDB();
+  await User.init(); // Wait for the unique email index before accepting registrations.
+  const port = Number(process.env.PORT || 5000);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("PORT must be an integer from 1 to 65535.");
+  app.listen(port, "0.0.0.0", () => console.log(`Server listening on port ${port}`));
+}

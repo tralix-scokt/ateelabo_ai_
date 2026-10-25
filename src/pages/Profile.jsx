@@ -1,10 +1,10 @@
+import { readUser } from "../lib/storage";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { useState, useRef } from "react";
 
 export default function Profile() {
-  const savedUser = localStorage.getItem("ateelabo_user");
-  const currentUser = savedUser ? JSON.parse(savedUser) : null;
+  const currentUser = readUser();
 
   const [name, setName] = useState(currentUser?.name || "");
   const [email, setEmail] = useState(currentUser?.email || "");
@@ -27,20 +27,17 @@ const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
 const fileInputRef = useRef(null);
 
-  const handleSave = () => {
-    const updatedUser = {
-      ...currentUser,
-      name,
-      email,
-      profilePicture,
-    };
-
-    localStorage.setItem(
-      "ateelabo_user",
-      JSON.stringify(updatedUser)
-    );
-
-    alert("Profile updated successfully! ✅");
+  const handleSave = async () => {
+    try {
+      const response = await fetch("/api/auth/profile", {
+        method: "PATCH", headers: { "Content-Type": "application/json", ...(localStorage.getItem("ateelabo_token") ? { Authorization: `Bearer ${localStorage.getItem("ateelabo_token")}` } : {}) },
+        body: JSON.stringify({ name, profilePicture }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || data.error || "Unable to save profile.");
+      localStorage.setItem("ateelabo_user", JSON.stringify(data.user));
+      alert("Profile saved successfully.");
+    } catch (error) { alert(error.message); }
   };
 
   const handleChangePassword = async () => {
@@ -61,7 +58,7 @@ const fileInputRef = useRef(null);
 
   try {
     const response = await fetch(
-      "http://localhost:5000/api/auth/change-password",
+      "/api/auth/change-password",
       {
         method: "POST",
         headers: {
@@ -84,6 +81,8 @@ const fileInputRef = useRef(null);
     }
 
     setPasswordMessage(data.message);
+    localStorage.removeItem("ateelabo_token");
+    localStorage.removeItem("ateelabo_user");
 
     setCurrentPassword("");
     setNewPassword("");
@@ -94,6 +93,8 @@ const fileInputRef = useRef(null);
     setChangingPassword(false);
   }
 };
+
+  if (!currentUser) return <div className="p-8 text-white">Please <Link to="/login">log in</Link> to manage your profile.</div>;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-black to-gray-800 text-white px-4 py-8">
@@ -234,12 +235,13 @@ const fileInputRef = useRef(null);
   <input
     ref={fileInputRef}
     type="file"
-    accept="image/*"
+    accept="image/png,image/jpeg,image/webp"
     className="hidden"
     onChange={(e) => {
       const file = e.target.files?.[0];
 
       if (!file) return;
+      if (!["image/png", "image/jpeg", "image/webp"].includes(file.type) || file.size > 110000) { alert("Choose a PNG, JPEG or WebP picture under 110 KB."); return; }
 
       const reader = new FileReader();
 
@@ -352,6 +354,8 @@ reader.readAsDataURL(file);
         </label>
 
         <input
+          readOnly
+          title="Email changes are not supported"
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}

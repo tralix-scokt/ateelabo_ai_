@@ -7,8 +7,7 @@ import Login from "./pages/Login";
 import SpeechRecognition, {
   useSpeechRecognition,
 } from "react-speech-recognition";
-import * as pdfjsLib from "pdfjs-dist";
-import mammoth from "mammoth";
+import { readUser, historyKey, loadChats } from "./lib/storage";
 import { useEffect, useState, useRef } from "react";
 import Sidebar from "./components/Sidebar";
 import WelcomePage from "./components/WelcomePage";
@@ -24,42 +23,42 @@ export default function App() {
   useState(null);
   const [chats,setChats] = useState([]);
   const [activeChat,setActiveChat] = useState(null);
-  const [user, setUser] = useState(() => {
-  const savedUser = localStorage.getItem("ateelabo_user");
-
-  return savedUser ? JSON.parse(savedUser) : null;
-});
   const [input,setInput] = useState("");
   const [loading,setLoading] = useState(false);
   const [search,setSearch] = useState("");
   const messagesEndRef = useRef(null);
   const [uploadedFile, setUploadedFile] =
   useState(null);
-  const [fileContext, setFileContext] = useState("");
-  const [fileName, setFileName] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const [isResizing, setIsResizing] = useState(false);
-  const [selectedModel, setSelectedModel] =
-  useState("Ateelabo AI");
+  const selectedModel = "Ateelabo AI";
 
-  const [currentUser, setCurrentUser] = useState(() => {
-  const savedUser = localStorage.getItem("ateelabo_user");
-
-
-  return savedUser ? JSON.parse(savedUser) : null;
-});
+  const [currentUser, setCurrentUser] = useState(() => readUser());
+  const storageKey = historyKey(currentUser);
+  const [loadedKey, setLoadedKey] = useState(null);
+  const requestRef = useRef(null);
+  useEffect(() => {
+    const sync = event => {
+      if (event.key === "ateelabo_user" || event.key === null) setCurrentUser(readUser());
+    };
+    window.addEventListener("storage", sync);
+    return () => window.removeEventListener("storage", sync);
+  }, []);
+  const busyRef = useRef(false);
 
 useEffect(() => {
-  if (location.state?.user) {
-    setCurrentUser(location.state.user);
-  }
-}, [location.state]);
+  setCurrentUser(readUser());
+}, [location.key]);
 
- const handleLogout = () => {
+ const handleLogout = async () => {
+  try {
+    const response = await fetch("/api/auth/logout", { method: "POST" });
+    if (!response.ok) throw new Error();
+  } catch { alert("Logout failed. Please check your connection and try again."); return; }
   localStorage.removeItem("ateelabo_user");
   localStorage.removeItem("ateelabo_token");
-  setUser(null);
+  requestRef.current?.abort();
   setCurrentUser(null);
 };
 
@@ -92,10 +91,13 @@ if (distance < -80) {
 
   const {
   transcript,
+  resetTranscript,
   browserSupportsSpeechRecognition,
 } = useSpeechRecognition();
 
 const startListening = () => {
+  if (!browserSupportsSpeechRecognition) return;
+  resetTranscript();
   SpeechRecognition.startListening({
     continuous: true,
   });
@@ -106,15 +108,6 @@ const stopListening = () => {
 
   setInput(transcript);
 };
-
-if (!browserSupportsSpeechRecognition) {
-  return (
-
-    <div>
-      Browser does not support speech recognition.
-    </div>
-  );
-}
 
 const reactToMessage = (
   chatId,
@@ -154,12 +147,19 @@ const handleFileUpload = (e) => {
 
   if (!file) return;
 
+  e.target.value = "";
+  if (!/\.(pdf|docx)$/i.test(file.name) || file.size > 10 * 1024 * 1024) {
+    alert("Choose a PDF or DOCX file no larger than 10 MB.");
+    return;
+  }
   setUploadedFile(file);
 
-  console.log("Uploaded:", file);
+
 };
 
 const speakText = (text) => {
+  if (!("speechSynthesis" in window)) return;
+  window.speechSynthesis.cancel();
   const speech = new SpeechSynthesisUtterance(text);
 
   speech.rate = 1;
@@ -237,60 +237,30 @@ useEffect(() => {
 }, [isResizing]);
 
  useEffect(() => {
+  requestRef.current?.abort();
+  const saved = loadChats(storageKey);
+  const initial = saved.length ? saved : [{ id: crypto.randomUUID(), title: "New Chat", messages: [] }];
+  setChats(initial);
+  setActiveChat(initial[0].id);
+  setUploadedFile(null);
+  setInput("");
+  setLoadedKey(storageKey);
+}, [storageKey]);
+
+useEffect(() => {
+  if (loadedKey !== storageKey) return;
   try {
-    const saved = localStorage.getItem("ateelabo_chats");
-    const savedActive = localStorage.getItem("ateelabo_active_chat");
-
-    if (saved) {
-      const parsed = JSON.parse(saved);
-
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        setChats(parsed);
-
-        const activeExists = parsed.some(
-          (chat) => String(chat.id) === String(savedActive)
-        );
-
-        setActiveChat(
-          activeExists
-            ? parsed.find(
-                (chat) => String(chat.id) === String(savedActive)
-              ).id
-            : parsed[0].id
-        );
-
-        return;
-      }
+    if (localStorage.getItem("ateelabo_save_history") !== "false") {
+      localStorage.setItem(storageKey, JSON.stringify(chats));
     }
+  } catch { /* Storage may be full or unavailable; keep the current in-memory chat. */ }
+}, [chats, loadedKey, storageKey]);
 
-    const firstChat = {
-      id: Date.now(),
-      title: "New Chat",
-      messages: [],
-    };
-
-    setChats([firstChat]);
-    setActiveChat(firstChat.id);
-  } catch (error) {
-    console.error("Failed to load saved chats:", error);
-  }
-}, []);
-
-  useEffect(() => {
-  const saveHistory =
-    localStorage.getItem("ateelabo_save_history") !== "false";
-
-  if (saveHistory && chats.length > 0) {
-    localStorage.setItem(
-      "ateelabo_chats",
-      JSON.stringify(chats)
-    );
-  }
-}, [chats]);
+useEffect(() => () => requestRef.current?.abort(), []);
 
  const createNewChat = () => {
 
-  const id = Date.now();
+  const id = crypto.randomUUID();
 
   const newChat = {
   id,
@@ -327,10 +297,13 @@ useEffect(() => {
 
   setChats(updated);
 
-  if (updated.length) {
-    setActiveChat(updated[0].id);
-  } else {
-    setActiveChat(null);
+  if (id === activeChat) {
+    if (updated.length) setActiveChat(updated[0].id);
+    else {
+      const blank = { id: crypto.randomUUID(), title: "New Chat", messages: [] };
+      setChats([blank]);
+      setActiveChat(blank.id);
+    }
   }
 };
 
@@ -353,204 +326,57 @@ const renameChat = (chatId, newTitle) => {
   const currentChat =
   chats.find(chat => String(chat.id) === String(activeChat));
   
- const streamText = async (
-  text,
-  callback 
-) => {
-
-  let output = "";
-
-  const speed = 12;
-
-  for (let i = 0; i < text.length; i++) {
-
-    output += text[i];
-
-    callback(output);
-
-    await new Promise(resolve =>
-      setTimeout(resolve, speed)
-    );
-  }
-};
-
   const sendMessage = async () => {
-
-    console.log("SEND BUTTON CLIKED");
-      console.log("INPUT:", input);
-  console.log("CURRENT CHAT:", currentChat);
-
-  console.log("Chats:", chats);
-console.log("ActiveChat:", activeChat);
-console.log("CurrentChat:", currentChat);
-
-if (loading) return;
-
-    if (!input || !currentChat) {
-    console.log("STOPPED HERE");
-    return;
-  }
-
-  console.log("CONTINUING...");
-
-
-    const userMessage = {
-  role: "user",
-  text: input,
-  time: new Date().toLocaleTimeString(),
-  fileName: uploadedFile ? uploadedFile.name : null,
-  fileType: uploadedFile ? uploadedFile.type : null
-};
-
-    const updatedChats = chats.map(chat => {
-
-      if(chat.id === activeChat){
-
-        return {
-
-          ...chat,
-
-          title:
-  chat.messages.length === 0
-    ? (
-        input.length > 20
-          ? input.substring(0, 15) + "..."
-          : input
-      )
-    : chat.title,
-    
-          messages:[
-            ...chat.messages,
-            userMessage
-          ]
-        };
-      }
-
-      return chat;
-    });
-
-    setChats(updatedChats);
+    if (busyRef.current || (!input.trim() && !uploadedFile) || !currentChat) return;
+    if (input.length > 10000) { alert("Message limit is 10,000 characters."); return; }
+    busyRef.current = true;
+    setLoading(true);
+    const chatId = currentChat.id;
+    const controller = new AbortController();
+    requestRef.current = controller;
+    let timedOut = false;
+    const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 120000);
+    const userMessage = { role: "user", text: input, time: new Date().toLocaleTimeString(), fileName: uploadedFile?.name || null };
+    setChats(prev => prev.map(chat => chat.id === chatId ? {
+      ...chat, title: chat.messages.length ? chat.title : (input.trim().slice(0, 25) || uploadedFile.name),
+      messages: [...chat.messages, userMessage],
+    } : chat));
     setInput("");
     setUploadedFile(null);
-    setLoading(true);
-
+    const appendReply = (text, isError = false, fileText) => setChats(prev => prev.map(chat => chat.id === chatId ? {
+      ...chat, ...(fileText ? { fileContext: fileText } : {}),
+      messages: [...chat.messages, { role: "ai", text, isError, time: new Date().toLocaleTimeString() }],
+    } : chat));
     try {
       const formData = new FormData();
-
-formData.append("message", input);
-
-if (uploadedFile) {
-  formData.append("file", uploadedFile);
-} 
-  if (fileContext) {
-  formData.append("fileContext", fileContext);
-}
-
+      formData.append("message", input);
+      if (uploadedFile) formData.append("file", uploadedFile);
+      else if (currentChat.fileContext) formData.append("fileContext", currentChat.fileContext);
+      let remaining = 40000;
+      const history = [];
+      for (const item of currentChat.messages.filter(item => !item.isError).slice(-20).reverse()) {
+        const content = item.text.slice(0, Math.min(10000, remaining));
+        if (!content) break;
+        history.unshift({ role: item.role === "ai" ? "assistant" : "user", content });
+        remaining -= content.length;
+      }
+      formData.append("history", JSON.stringify(history));
       const token = localStorage.getItem("ateelabo_token");
-
-const response = await fetch(
-  "http://localhost:5000/api/chat",
-  {
-    method: "POST",
-    headers: token
-      ? {
-          Authorization: `Bearer ${token}`,
-        }
-      : {},
-    body: formData,
-  }
-);
+      const response = await fetch("/api/chat", {
+        method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData, signal: controller.signal,
+      });
       const data = await response.json();
-      if (data.fileText) {
-  setFileContext(data.fileText);
-}
-
-if (data.fileName) {
-  setFileName(data.fileName);
-}
-
-console.log("API RESPONSE:", data);
-
-if (!response.ok || !data.reply) {
-  const errorMessage =
-    data.error ||
-    "Ateelabo AI couldn't respond right now. Please try again later.";
-
-  setChats((prev) =>
-    prev.map((chat) =>
-      chat.id === activeChat
-        ? {
-            ...chat,
-            messages: [
-              ...chat.messages,
-              {
-                role: "ai",
-                text: errorMessage,
-                time: new Date().toLocaleTimeString(),
-              },
-            ],
-          }
-        : chat
-    )
-  );
-
-  setLoading(false);
-  return;
-}
-
-      let aiMessage = {
-        role:"ai",
-        text:""
-      };
-
-      setChats(prev =>
-        prev.map(chat =>
-          chat.id === activeChat
-          ? {
-              ...chat,
-              messages:[
-                ...chat.messages,
-                aiMessage
-              ]
-            }
-          : chat
-        )
-      );
-
-      await streamText(
-        data.reply,
-        (partial)=>{
-
-          setChats(prev =>
-            prev.map(chat => {
-
-              if(chat.id !== activeChat)
-                return chat;
-
-              const msgs =
-                [...chat.messages];
-
-              msgs[msgs.length-1] = {
-              
-  role: "ai",
-  text: partial,
-  time: new Date().toLocaleTimeString()
-}
-
-              return {
-                ...chat,
-                messages:msgs
-              };
-            })
-          );
-        }
-      );
-
-    } catch(err){
-      console.log(err);
+      if (!response.ok || !data.reply) throw new Error(data.error || "Unable to get an AI response. Please try again.");
+      if (!controller.signal.aborted) appendReply(data.reply, false, data.fileText);
+    } catch (error) {
+      if (timedOut) appendReply("Request timed out. Please try again.", true);
+      else if (!controller.signal.aborted) appendReply(error.message || "Connection failed. Please try again.", true);
+    } finally {
+      clearTimeout(timeout);
+      busyRef.current = false;
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   const togglePin = (id) => {
@@ -680,6 +506,7 @@ if (!response.ok || !data.reply) {
       <div
       onTouchStart={handleTouchStart}
   onTouchEnd={handleTouchEnd}
+  style={{ width: sidebarWidth, maxWidth: "calc(100vw - 24px)" }}
 
   className={`
     fixed top-0 left-0 h-full z-50
@@ -709,7 +536,7 @@ if (!response.ok || !data.reply) {
     search={search}
     setSearch={setSearch}
     currentUser={currentUser}
-    user={user}
+    user={currentUser}
 handleLogout={handleLogout}
   />
 
@@ -809,56 +636,7 @@ handleLogout={handleLogout}
             </span>
   
 
-  <motion.select
-
-  whileHover={{
-   scale:1.05
- }}
-
- whileTap={{
-   scale:0.95
- }}
-
-    value={selectedModel}
-    onChange={(e) =>
-      setSelectedModel(
-        e.target.value
-      )
-    }
-    className="
-      bg-cyan-900
-      px-
-      py-0
-      rounded-lg
-      text-sm
-    "
-  >
-    
-    <option>
-      
-    </option>
-
-    <option value="gpt-4o-mini">
-  GPT-4o Mini
-</option>
-
-<option value="gpt-4.1">
-  GPT-4.1
-</option>
-
-<option value="gemini-2.5-flash">
-  Gemini 2.5 Flash
-</option>
-
-<option value="claude-sonnet">
-  Claude Sonnet
-</option>
-
-<option value="deepseek">
-  DeepSeek
-</option>
-
-  </motion.select>
+  <span className="rounded-lg bg-cyan-900 px-2 py-1 text-xs" title="Models are configured on the server">Automatic provider</span>
 
 </div>
 
@@ -982,9 +760,10 @@ handleLogout={handleLogout}
             {msg.role === "ai" && (
               <div className="mt-4 flex flex-wrap items-center gap-1 border-t border-white/[0.07] pt-3">
                 <button
-                  onClick={() =>
-                    navigator.clipboard.writeText(msg.text || "")
-                  }
+                  onClick={async () => {
+                    try { await navigator.clipboard.writeText(msg.text || ""); }
+                    catch { alert("Unable to copy. Please select and copy the text manually."); }
+                  }}
                   className="rounded-lg px-3 py-2 text-xs text-slate-400 transition hover:bg-white/[0.07] hover:text-cyan-300"
                   title="Copy response"
                   aria-label="Copy response"
@@ -993,8 +772,9 @@ handleLogout={handleLogout}
                 </button>
 
                 <button
-                  onClick={() => alert("Thanks for your feedback!")}
+                  onClick={() => reactToMessage(currentChat.id, index, "like")}
                   className="rounded-lg px-3 py-2 text-xs text-slate-400 transition hover:bg-white/[0.07] hover:text-emerald-300"
+                  aria-pressed={msg.reaction === "like"}
                   title="Like response"
                   aria-label="Like response"
                 >
@@ -1002,8 +782,9 @@ handleLogout={handleLogout}
                 </button>
 
                 <button
-                  onClick={() => alert("Feedback received")}
+                  onClick={() => reactToMessage(currentChat.id, index, "dislike")}
                   className="rounded-lg px-3 py-2 text-xs text-slate-400 transition hover:bg-white/[0.07] hover:text-rose-300"
+                  aria-pressed={msg.reaction === "dislike"}
                   title="Dislike response"
                   aria-label="Dislike response"
                 >
@@ -1052,6 +833,7 @@ handleLogout={handleLogout}
   <input
     type="file"
     id="fileInput"
+    accept=".pdf,.docx"
     hidden
     onChange={handleFileUpload}
   />
@@ -1139,13 +921,6 @@ handleLogout={handleLogout}
           "
         >
           <div className="flex min-w-0 items-center gap-3">
-            {uploadedFile.type.startsWith("image/") ? (
-              <img
-                src={URL.createObjectURL(uploadedFile)}
-                alt={uploadedFile.name}
-                className="h-11 w-11 flex-shrink-0 rounded-xl object-cover"
-              />
-            ) : (
               <div
                 className="
                   flex h-11 w-11 flex-shrink-0 items-center
@@ -1158,7 +933,6 @@ handleLogout={handleLogout}
                   ? "📕"
                   : "📄"}
               </div>
-            )}
 
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-gray-100">
@@ -1215,7 +989,7 @@ handleLogout={handleLogout}
             Math.min(e.target.scrollHeight, 180) + "px";
         }}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
+          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && localStorage.getItem("ateelabo_enter_to_send") !== "false") {
             e.preventDefault();
             sendMessage();
           }
@@ -1262,6 +1036,7 @@ handleLogout={handleLogout}
       whileHover={{ scale: 1.05 }}
       whileTap={{ scale: 0.94 }}
       onClick={startListening}
+      disabled={!browserSupportsSpeechRecognition}
       title="Voice input"
       aria-label="Start voice input"
       className="
@@ -1369,6 +1144,7 @@ handleLogout={handleLogout}
     </div>
   }
     />
+<Route path="*" element={<div className="p-8 text-white">Page not found. <Link to="/">Return to chat</Link></div>} />
 </Routes>
     
     

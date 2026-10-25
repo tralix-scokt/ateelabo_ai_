@@ -5,14 +5,11 @@ import { useState } from "react";
 export default function Settings() {
 
   
-  const [streaming, setStreaming] = useState(true);
 const [saveHistory, setSaveHistory] = useState(
   localStorage.getItem("ateelabo_save_history") !== "false"
 );
-  const [enterToSend, setEnterToSend] = useState(true);
-  const [theme, setTheme] = useState(
-  localStorage.getItem("ateelabo_theme") || "dark"
-);
+  const [enterToSend, setEnterToSend] = useState(localStorage.getItem("ateelabo_enter_to_send") !== "false");
+
 
   return (
     <div className="min-h-screen bg-[#070a12] text-white px-4 py-8 sm:px-6">
@@ -62,22 +59,13 @@ const [saveHistory, setSaveHistory] = useState(
               </p>
 
               <p className="text-sm text-gray-500">
-                Current interface theme
+                Dark theme (other themes are not yet supported)
               </p>
             </div>
 
             <select
-  value={theme}
-  onChange={(e) => {
-    const newTheme = e.target.value;
-
-    setTheme(newTheme);
-
-    localStorage.setItem(
-      "ateelabo_theme",
-      newTheme
-    );
-  }}
+  disabled
+  value="dark"
   className="
     rounded-xl
     border
@@ -139,32 +127,11 @@ const [saveHistory, setSaveHistory] = useState(
                 </p>
 
                 <p className="text-sm text-gray-500">
-                  Choose the model used for new chats
+                  Provider models are configured by the server administrator
                 </p>
               </div>
 
-              <select className="rounded-xl border border-white/10 b-white/[0.05] px-4 py-2 text-sm bg-cyan-900">
-              
-                <option value="gpt-4o-mini">
-                    GPT-4o Mini
-                  </option>
-
-                  <option value="gpt-4.1">
-                    GPT-4.1
-                  </option>
-
-                  <option value="gemini-2.5-flash">
-                    Gemini 2.5 Flash
-                  </option>
-
-                  <option value="claude-sonnet">
-                    Claude Sonnet
-                  </option>
-
-                  <option value="deepseek">
-                    DeepSeek
-                  </option>
-            </select>
+              <span className="text-sm text-gray-400">Server-managed (OpenAI with Gemini fallback)</span>
             </div>
 
             {/* Streaming */}
@@ -175,26 +142,11 @@ const [saveHistory, setSaveHistory] = useState(
                 </p>
 
                 <p className="text-sm text-gray-500">
-                  Show AI responses as they are generated
+                  Responses are currently delivered when complete
                 </p>
               </div>
 
-              <button
-                onClick={() => setStreaming(!streaming)}
-                className={`relative h-7 w-12 rounded-full transition ${
-                  streaming
-                    ? "bg-cyan-500"
-                    : "bg-zinc-700"
-                }`}
-              >
-                <span
-                  className={`absolute top-1 h-5 w-5 rounded-full bg-white transition ${
-                    streaming
-                      ? "left-6"
-                      : "left-1"
-                  }`}
-                />
-              </button>
+              <span className="text-sm text-gray-400">Not available</span>
             </div>
 
           </div>
@@ -223,7 +175,7 @@ const [saveHistory, setSaveHistory] = useState(
                 </p>
 
                 <p className="text-sm text-gray-500">
-                  Keep your conversations available in the sidebar
+                  Save future changes on this browser; existing saved history is not erased
                 </p>
               </div>
 
@@ -267,7 +219,7 @@ const [saveHistory, setSaveHistory] = useState(
               </div>
 
               <button
-                onClick={() => setEnterToSend(!enterToSend)}
+                onClick={() => { localStorage.setItem("ateelabo_enter_to_send", String(!enterToSend)); setEnterToSend(!enterToSend); }}
                 className={`relative h-7 w-12 rounded-full transition ${
                   enterToSend
                     ? "bg-cyan-500"
@@ -286,6 +238,18 @@ const [saveHistory, setSaveHistory] = useState(
 
           </div>
         </motion.div>
+
+        {localStorage.getItem("ateelabo_chats") && (
+          <div className="mb-5 rounded-2xl border border-white/10 p-6">
+            <h2 className="text-lg font-semibold">Legacy chat backup</h2>
+            <p className="my-3 text-sm text-gray-400">Older chats were not tied to an account. They remain untouched and are not automatically assigned to anyone. Download them only on a browser you own.</p>
+            <button onClick={() => {
+              const url = URL.createObjectURL(new Blob([localStorage.getItem("ateelabo_chats")], { type: "application/json" }));
+              const link = document.createElement("a"); link.href = url; link.download = "ateelabo-legacy-chats.json"; link.click();
+              setTimeout(() => URL.revokeObjectURL(url), 1000);
+            }} className="rounded-xl bg-cyan-700 px-4 py-2">Download legacy chats</button>
+          </div>
+        )}
 
         {/* Account */}
         <motion.div
